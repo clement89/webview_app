@@ -1,125 +1,88 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:connectivity/connectivity.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:modal_progress_hud/modal_progress_hud.dart';
-import 'package:package_info/package_info.dart';
+import 'package:provider/provider.dart';
 import 'package:store_redirect/store_redirect.dart';
 import 'package:webview_app/pages/page_not_found.dart';
-import 'package:webview_app/services/api_handler.dart';
+import 'package:webview_app/providers/home_provider.dart';
 import 'package:webview_flutter/platform_interface.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-class HomePage extends StatefulWidget {
-  @override
-  _HomePageState createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  final Completer<WebViewController> _controller =
-      Completer<WebViewController>();
-  var subscription;
-  bool _isConnected = true;
-  bool _isLoading = true;
-
-  APIHandler _apiHandler = APIHandler();
-
-  @override
-  void initState() {
-    super.initState();
-    checkForceUpdate();
-
-    if (Platform.isAndroid) WebView.platform = SurfaceAndroidWebView();
-    subscription = Connectivity()
-        .onConnectivityChanged
-        .listen((ConnectivityResult result) {
-      if (result == ConnectivityResult.none) {
-        print('not connected to internet');
-        setState(() {
-          _isConnected = false;
-        });
-      } else {
-        setState(() {
-          _isConnected = true;
-        });
-      }
-      // Got a new connectivity status!
-    });
-  }
-
-  @override
-  dispose() {
-    super.dispose();
-    subscription.cancel();
-  }
-
+class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
+    final Completer<WebViewController> _controller =
+        Completer<WebViewController>();
+    final _homeProvider = Provider.of<HomeProvider>(context, listen: false);
+    _homeProvider.checkConnectivity();
+    _homeProvider.checkForceUpdate(callBack: () {
+      _showMyDialog(context);
+    });
 
-    return WillPopScope(
-      child: Scaffold(
-        body: !_isConnected
-            ? PageNotFound()
-            : SafeArea(
-                child: ModalProgressHUD(
-                  inAsyncCall: _isLoading,
-                  child: Container(
-                    color: Colors.white,
-                    child: Builder(builder: (BuildContext context) {
-                      return WebView(
-                        initialUrl: 'https://www.stayhopper.com',
-                        javascriptMode: JavascriptMode.unrestricted,
-                        onWebViewCreated:
-                            (WebViewController webViewController) {
-                          _controller.complete(webViewController);
-                        },
-                        onProgress: (int progress) {
-                          print("WebView is loading (progress : $progress%)");
-                        },
-                        javascriptChannels: <JavascriptChannel>{
-                          _toasterJavascriptChannel(context),
-                        },
-                        navigationDelegate: (NavigationRequest request) {
-                          print('allowing navigation to $request');
-                          return NavigationDecision.navigate;
-                        },
-                        onPageStarted: (String url) {
-                          print('Page started loading: $url');
-                        },
-                        onPageFinished: (String url) {
-                          print('Page finished loading: $url');
-                          setState(() {
-                            _isLoading = false;
-                          });
-                        },
-                        onWebResourceError: (WebResourceError error) {
-                          print('Error loading page - ${error.description}');
-                          setState(() {
-                            _isLoading = false;
-                          });
-                        },
-                        gestureNavigationEnabled: true,
-                      );
-                    }),
+    return Consumer<HomeProvider>(
+      builder: (context, provider, child) {
+        print('reloading account page - ');
+
+        return WillPopScope(
+          child: Scaffold(
+            body: !provider.isConnected
+                ? PageNotFound()
+                : SafeArea(
+                    child: ModalProgressHUD(
+                      inAsyncCall: provider.isLoading,
+                      child: Container(
+                        color: Colors.white,
+                        child: Builder(builder: (BuildContext context) {
+                          return WebView(
+                            initialUrl: 'https://www.stayhopper.com',
+                            javascriptMode: JavascriptMode.unrestricted,
+                            onWebViewCreated:
+                                (WebViewController webViewController) {
+                              _controller.complete(webViewController);
+                            },
+                            onProgress: (int progress) {
+                              print(
+                                  "WebView is loading (progress : $progress%)");
+                            },
+                            javascriptChannels: <JavascriptChannel>{
+                              _toasterJavascriptChannel(context),
+                            },
+                            navigationDelegate: (NavigationRequest request) {
+                              print('allowing navigation to $request');
+                              return NavigationDecision.navigate;
+                            },
+                            onPageStarted: (String url) {
+                              print('Page started loading: $url');
+                            },
+                            onPageFinished: (String url) {
+                              print('Page finished loading: $url');
+                              provider.setLoading(false);
+                            },
+                            onWebResourceError: (WebResourceError error) {
+                              print(
+                                  'Error loading page - ${error.description}');
+                              provider.setLoading(false);
+                            },
+                            gestureNavigationEnabled: true,
+                          );
+                        }),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-      ),
-      onWillPop: () async {
-        WebViewController webViewController = await _controller.future;
-        bool canNavigate = await webViewController.canGoBack();
-        if (canNavigate) {
-          webViewController.goBack();
-          return false;
-        } else {
-          return true;
-        }
+          ),
+          onWillPop: () async {
+            WebViewController webViewController = await _controller.future;
+            bool canNavigate = await webViewController.canGoBack();
+            if (canNavigate) {
+              webViewController.goBack();
+              return false;
+            } else {
+              return true;
+            }
+          },
+        );
       },
     );
   }
@@ -135,43 +98,10 @@ class _HomePageState extends State<HomePage> {
         });
   }
 
-  void checkForceUpdate() async {
-    try {
-      Map<String, dynamic> response = await _apiHandler.getVersionInfo();
-      Map<String, dynamic> data = response['data'];
-
-      Map<String, dynamic> platformData = data['ios'];
-
-      if (Platform.isIOS) {
-        platformData = data['ios'];
-      } else {
-        platformData = data['android'];
-      }
-
-      bool forceUpdate = platformData['forceUpdate'];
-      if (forceUpdate) {
-        String newVersion = platformData['buildVersion'];
-        PackageInfo packageInfo = await PackageInfo.fromPlatform();
-        String currentVersion = packageInfo.version;
-
-        currentVersion =
-            currentVersion.substring(0, '$currentVersion'.indexOf('.') + 1 + 1);
-        print('currentVersion -- >> $currentVersion');
-        print('newVersion -- >> $newVersion');
-
-        if (double.parse(currentVersion) < double.parse(newVersion)) {
-          _showMyDialog();
-        }
-      }
-    } catch (e) {
-      print('Error - $e');
-    }
-  }
-
   double getNumber(double input, {int precision = 2}) => double.parse(
       '$input'.substring(0, '$input'.indexOf('.') + precision + 1));
 
-  Future<void> _showMyDialog() async {
+  Future<void> _showMyDialog(BuildContext context) async {
     String platform = '';
     if (Platform.isIOS) {
       platform = 'Apple Store';
@@ -200,6 +130,12 @@ class _HomePageState extends State<HomePage> {
                 StoreRedirect.redirect(
                     androidAppId: "com.iroid.stayhopper",
                     iOSAppId: "1439901947");
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: Text('CANCEL'),
+              onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
