@@ -1,6 +1,6 @@
 # webview_app
 
-A new simple webview app with flutter. The app using Provider architecture.
+A new simple webview app with flutter. The app is using Provider architecture.
 
 ## Getting Started
 
